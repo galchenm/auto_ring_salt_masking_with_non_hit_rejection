@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # coding: utf8
 # Written by: Galchenkova M. and Yefanov O., 2022
-# source /home/galchenm/P09/om/install/bin/activate
 
 """
+This version of ice/salt masking does not include non-hits rejection!
+
 Before using this program, you need to do next steps after loading all necessary files:
 
 g++ -shared -o rings_rejection.so -fPIC rings_rejection.cpp
@@ -51,40 +52,30 @@ from om.algorithms.crystallography import TypePeakList, Peakfinder8PeakDetection
 os.nice(0)
 
 # constant values
-MIN_VAL =  -0.5
-MAX_VAL = 65000 #Change this parameter if it is needed 
+minVal =  -0.5
+maxVal = 65000
 
-ISTEP=1 #Change this parameter if it is needed 
+istep=1
 
-ASIC_NX=2463 #Change this parameter if it is needed
-ASIC_NY=2527 #Change this parameter if it is needed
-NASICS_X=1 #Change this parameter if it is needed
-NASICS_Y=1 #Change this parameter if it is needed
+asic_nx=2463 #Change this parameter if it is needed - CHANGE
+asic_ny=2527 #Change this parameter if it is needed - CHANGE
+nasics_x=1 #Change this parameter if it is needed
+nasics_y=1 #Change this parameter if it is needed
 
-WIND = 10
-DIFFER = 0.05
+wind = 10
+differ = 0.05
 
-#hit finder parameter for salt and ice rings masking
-HIT_FINDER_MIN_SNR=3.5 #Change this parameter if it is needed 
-ADC_THRESH=5 #Change this parameter if it is needed 
-HIT_FINDER_MIN_PIX_COUNT=10 #Change this parameter if it is needed 
-HIT_FINDER_MAX_PIX_COUNT=500000 #Change this parameter if it is needed 
-HIT_FINDER_LOCAL_BG_RADIUS=1 #Change this parameter if it is needed 
+hitfinderMinSNR=3.5 #3.5 #4.0 
+ADCthresh=5
+hitfinderMinPixCount=10 #20 #2 #1 #20
+hitfinderMaxPixCount=500000 #20 #2000
+hitfinderLocalBGRadius=1
 
-#hit finder parameter for non-hits-rejection
-HIT_FINDER_MIN_SNR_NON_HIT=8 #Change this parameter if it is needed 
-ADC_THRESH_NON_HIT=5 #Change this parameter if it is needed 
-HIT_FINDER_MIN_PIX_COUNT_NON_HIT=1 #Change this parameter if it is needed 
-HIT_FINDER_MAX_PIX_COUNT_NON_HIT=10 #Change this parameter if it is needed 
-HIT_FINDER_LOCAL_BG_RADIUS_NON_HIT=3 #Change this parameter if it is needed 
-MIN_RES=0 #Change this parameter if it is needed 
-MAX_RES=1200 #Change this parameter if it is needed 
+MASK_RAD = 10
 
-MASK_RAD = 10 #Change this parameter if it is needed 
+MIN_PEAKS = 20
 
-MIN_PEAKS = 20 #Change this parameter if it is needed 
-
-MAX_NUM_PEAKS = 10000 #Change this parameter if it is needed 
+MAX_NUM_PEAKS = 10000
 
 class CustomFormatter(argparse.RawDescriptionHelpFormatter,
                       argparse.ArgumentDefaultsHelpFormatter):
@@ -116,10 +107,10 @@ class PeakFinderStructure(ct.Structure):
 
 
 def PeakFinder8py(peaklist, data, mask, pix_r,
-                  ASIC_NX, ASIC_NY, NASICS_X, NASICS_Y,
-                  ADC_THRESH, HIT_FINDER_MIN_SNR,
-                  HIT_FINDER_MIN_PIX_COUNT, HIT_FINDER_MAX_PIX_COUNT,
-                  HIT_FINDER_LOCAL_BG_RADIUS, outliersMask):
+                  asic_nx, asic_ny, nasics_x, nasics_y,
+                  ADCthresh, hitfinderMinSNR,
+                  hitfinderMinPixCount, hitfinderMaxPixCount,
+                  hitfinderLocalBGRadius, outliersMask):
     req = PeakFinderStructure()
     req.nPeaks_max = MAX_NUM_PEAKS
     lib = ct.CDLL('peakfinder8.so')
@@ -132,15 +123,22 @@ def PeakFinder8py(peaklist, data, mask, pix_r,
     outliersMask_buf = np.zeros(len_outliersMask, dtype=np.int8)
     
     pfun.argtypes = (ct.POINTER(PeakFinderStructure),ct.c_void_p,ct.c_void_p,ct.c_void_p,ct.c_long,ct.c_long,ct.c_long,ct.c_long,ct.c_float,ct.c_float,ct.c_long,ct.c_long,ct.c_long,ct.c_void_p)
-    int_flag = pfun(ct.byref(req),_np_ptr(data),_np_ptr(mask),_np_ptr(pix_r),ASIC_NX, ASIC_NY, NASICS_X, NASICS_Y,
-                    ADC_THRESH, HIT_FINDER_MIN_SNR,
-                    HIT_FINDER_MIN_PIX_COUNT, HIT_FINDER_MAX_PIX_COUNT,
-                    HIT_FINDER_LOCAL_BG_RADIUS, _np_ptr(outliersMask_buf))
+    int_flag = pfun(ct.byref(req),_np_ptr(data),_np_ptr(mask),_np_ptr(pix_r),asic_nx, asic_ny, nasics_x, nasics_y,
+                    ADCthresh, hitfinderMinSNR,
+                    hitfinderMinPixCount, hitfinderMaxPixCount,
+                    hitfinderLocalBGRadius, _np_ptr(outliersMask_buf))
     if outliersMask is not None:
+        print('I am here-128')
         outliersMask[:] = outliersMask_buf.copy()
     return outliersMask_buf
 
-def DilateMask(mask, inpMask, ASIC_NX, ASIC_NY, NASICS_X, NASICS_Y, maskRad=MASK_RAD):
+'''
+//long asic_nx, long asic_ny, long nasics_x, long nasics_y
+void DilateMask(char *mask, char* inpMask, int tileX, int tileY, int nTilesX, int nTilesY, int maskRad)
+'''
+
+
+def DilateMask(mask, inpMask, asic_nx, asic_ny, nasics_x, nasics_y, maskRad=MASK_RAD):
     lib = ct.CDLL('peakfinder8.so')
     pfun = lib.DilateMask
     pfun.restype = ct.c_int
@@ -148,12 +146,12 @@ def DilateMask(mask, inpMask, ASIC_NX, ASIC_NY, NASICS_X, NASICS_Y, maskRad=MASK
     mask_buf = np.zeros(len(mask), dtype=np.int8)
     inpMask = np.array(inpMask, dtype=np.int8)
     pfun.argtypes = ct.c_void_p, ct.c_void_p, ct.c_int, ct.c_int, ct.c_int, ct.c_int, ct.c_int
-    int_flag = pfun(_np_ptr(mask_buf), _np_ptr(inpMask), ASIC_NX, ASIC_NY, NASICS_X, NASICS_Y, maskRad)
+    int_flag = pfun(_np_ptr(mask_buf), _np_ptr(inpMask), asic_nx, asic_ny, nasics_x, nasics_y, maskRad)
     mask[:] = mask_buf.copy()
     
     return mask
     
-def pBuildRadiulArray(NxNy, det_x, det_y, ISTEP, pix_r, maxRad, pixelsR):
+def pBuildRadiulArray(NxNy, det_x, det_y, istep, pix_r, maxRad, pixelsR):
     det_x = np.array(det_x, dtype=np.float32)
     det_y = np.array(det_y, dtype=np.float32)
     pix_r = np.array([0] * NxNy, dtype=np.int32)
@@ -163,10 +161,10 @@ def pBuildRadiulArray(NxNy, det_x, det_y, ISTEP, pix_r, maxRad, pixelsR):
     pfun = lib.BuildRadialArray
     pfun.restype = ct.c_bool
     pfun.argtypes = (ct.c_size_t, ct.c_void_p, ct.c_void_p, ct.c_float, ct.c_void_p, ct.POINTER(ct.c_int), ct.c_void_p)
-    flag_BRA = pfun(NxNy, _np_ptr(det_x), _np_ptr(det_y), ISTEP, _np_ptr(pix_r), ct.byref(maxRad), _np_ptr(pixelsR))
+    flag_BRA = pfun(NxNy, _np_ptr(det_x), _np_ptr(det_y), istep, _np_ptr(pix_r), ct.byref(maxRad), _np_ptr(pixelsR))
     return flag_BRA, pix_r, maxRad.value, pixelsR
 
-def MaskRingsSimplepy(tileFs, tileSs, nTilesFs, nTilesSs, data, staticMask, MIN_VAL, MAX_VAL, maxRad, pix_r, WIND, DIFFER, outMask):
+def MaskRingsSimplepy(tileFs, tileSs, nTilesFs, nTilesSs, data, staticMask, minVal, maxVal, maxRad, pix_r, wind, differ, outMask):
     data = np.array(data, dtype=np.float32)
     pix_r = np.array(pix_r,dtype=np.float32)
     staticMask = np.array(staticMask, dtype=np.int8)
@@ -175,7 +173,7 @@ def MaskRingsSimplepy(tileFs, tileSs, nTilesFs, nTilesSs, data, staticMask, MIN_
     pfun = lib.main
     pfun.restype = ct.c_int
     pfun.argtypes = (ct.c_int, ct.c_int, ct.c_int, ct.c_int, ct.c_void_p, ct.c_void_p, ct.c_float, ct.c_float, ct.c_int, ct.c_void_p, ct.c_int, ct.c_float, ct.c_void_p)
-    nummasked = pfun(tileFs, tileSs, nTilesFs, nTilesSs, _np_ptr(data), _np_ptr(staticMask), MIN_VAL, MAX_VAL, maxRad, _np_ptr(pix_r), WIND, DIFFER, _np_ptr(outMask))
+    nummasked = pfun(tileFs, tileSs, nTilesFs, nTilesSs, _np_ptr(data), _np_ptr(staticMask), minVal, maxVal, maxRad, _np_ptr(pix_r), wind, differ, _np_ptr(outMask))
     return outMask, nummasked 
 
 def copy_hdf5(file, output_folder):
@@ -257,26 +255,26 @@ def is_hit(data):
     pf8_info = PF8Info(
         max_num_peaks=MAX_NUM_PEAKS,
         pf8_detector_info=dict(
-            asic_nx=ASIC_NX,
-            asic_ny=ASIC_NY,
-            nasics_x=NASICS_X,
-            nasics_y=NASICS_Y,
+            asic_nx=asic_nx,
+            asic_ny=asic_ny,
+            nasics_x=nasics_x,
+            nasics_y=nasics_y,
         ),
-        adc_threshold=ADC_THRESH_NON_HIT,
-        minimum_snr=HIT_FINDER_MIN_SNR_NON_HIT,
-        min_pixel_count=HIT_FINDER_MIN_PIX_COUNT_NON_HIT,
-        max_pixel_count=HIT_FINDER_MAX_PIX_COUNT_NON_HIT,
-        local_bg_radius=HIT_FINDER_LOCAL_BG_RADIUS_NON_HIT,
-        min_res=MIN_RES,
-        max_res=MAX_RES,
-        _bad_pixel_map=np.ones((ASIC_NY,ASIC_NX), dtype=np.int8),
+        adc_threshold=ADCthresh,
+        minimum_snr=hitfinderMinSNR,
+        min_pixel_count=1,
+        max_pixel_count=hitfinderMinPixCount-1,
+        local_bg_radius=3,
+        min_res=0,
+        max_res=1200,
+        _bad_pixel_map=np.ones((asic_ny,asic_nx), dtype=np.int8),
     )
 
     pf8 = PF8(pf8_info)
 
     peak_list = pf8.get_peaks_pf8(data=data)
     num_of_peaks = peak_list['num_peaks']
-    print(num_of_peaks, num_of_peaks < MIN_PEAKS)
+    print(f'num_of_peaks = {num_of_peaks}')
     if num_of_peaks < MIN_PEAKS:
         return False
     return True
@@ -308,7 +306,7 @@ def copy_hdf5_with_non_hits_rejection(file, h5path, init_shape, max_shape, outpu
     h5w.clsoe()
     return file_copy
 
-def reading_hdf5_files(files, h5path, staticMask_filename, mask_h5path, MIN_VAL, MAX_VAL, maxRad, pix_r, WIND, DIFFER, output_folder):
+def reading_hdf5_files(files, h5path, staticMask_filename, mask_h5path, minVal, maxVal, maxRad, pix_r, wind, differ, output_folder):
 
     for file in files:
         copy_hdf5(file, output_folder)
@@ -341,20 +339,22 @@ def reading_hdf5_files(files, h5path, staticMask_filename, mask_h5path, MIN_VAL,
             data = f[h5path]
             
             for i in range(num):
+                #data.resize((i+1,) + mask_shape)
+
                 dilate_mask_data.resize((i+1,) + mask_shape)
 
                 outliersMask_buf = np.zeros_like(staticMask.flatten(), dtype=np.int8)
                 
-                outMask, nummasked = MaskRingsSimplepy(ASIC_NX, ASIC_NY, NASICS_X, NASICS_Y, data_from_cbf.flatten(), staticMask.flatten(), MIN_VAL, MAX_VAL, maxRad, pix_r, WIND, DIFFER, None)
+                outMask, nummasked = MaskRingsSimplepy(asic_nx, asic_ny, nasics_x, nasics_y, data_from_cbf.flatten(), staticMask.flatten(), minVal, maxVal, maxRad, pix_r, wind, differ, None)
                 
                 outliersMask_salt = PeakFinder8py(None, data[i,].flatten(), outMask, \
-                                        pix_r, ASIC_NX, ASIC_NY, NASICS_X, NASICS_Y, \
-                                        ADC_THRESH, HIT_FINDER_MIN_SNR, \
-                                        HIT_FINDER_MIN_PIX_COUNT, HIT_FINDER_MAX_PIX_COUNT, HIT_FINDER_LOCAL_BG_RADIUS, outliersMask_buf)
+                                        pix_r, asic_nx, asic_ny, nasics_x, nasics_y, \
+                                        ADCthresh, hitfinderMinSNR, \
+                                        hitfinderMinPixCount, hitfinderMaxPixCount, hitfinderLocalBGRadius, outliersMask_buf)
                 
                 mask_buf = np.zeros_like(staticMask.flatten(), dtype=np.int8)
                         
-                outliersMask = DilateMask(mask_buf, outliersMask_salt, ASIC_NX, ASIC_NY, NASICS_X, NASICS_Y, MASK_RAD)
+                outliersMask = DilateMask(mask_buf, outliersMask_salt, asic_nx, asic_ny, nasics_x, nasics_y, MASK_RAD)
                 outliersMask += inverted_staticMask
                 outliersMask[outliersMask > 1] = 0
                 outliersMask = 1 - outliersMask
@@ -365,7 +365,7 @@ def reading_hdf5_files(files, h5path, staticMask_filename, mask_h5path, MIN_VAL,
     else:
         return None
         
-def reading_cbf_files(files, staticMask_filename, mask_h5path, MIN_VAL, MAX_VAL, maxRad, pix_r, WIND, DIFFER, output_folder):
+def reading_cbf_files(files, staticMask_filename, mask_h5path, minVal, maxVal, maxRad, pix_r, wind, differ, output_folder):
     files.sort()
     
     num = len(files)
@@ -391,6 +391,8 @@ def reading_cbf_files(files, staticMask_filename, mask_h5path, MIN_VAL, MAX_VAL,
     
     with h5.File(generated_hdf5_filename, 'w') as output_hdf5:
         data = output_hdf5.create_dataset('/data/data', init_shape, maxshape=max_shape, dtype=np.float32, chunks=init_shape, compression="gzip", compression_opts=6)
+        #input_mask_data = output_hdf5.create_dataset('/input/data', init_shape, maxshape=max_shape, dtype=np.int8, chunks=init_shape, compression="gzip", compression_opts=6)
+        #mask_data = output_hdf5.create_dataset('/mask/data', init_shape, maxshape=max_shape, dtype=np.int8, chunks=init_shape, compression="gzip", compression_opts=6)
         dilate_mask_data = output_hdf5.create_dataset('/dilate/data', init_shape, maxshape=max_shape, dtype=np.int8, chunks=init_shape, compression="gzip", compression_opts=6)  
         salt_mask_data = output_hdf5.create_dataset('/salt/data', init_shape, maxshape=max_shape, dtype=np.int8, chunks=init_shape, compression="gzip", compression_opts=6) 
         
@@ -402,30 +404,37 @@ def reading_cbf_files(files, staticMask_filename, mask_h5path, MIN_VAL, MAX_VAL,
             data_from_cbf = img.data
             
             if is_hit(data_from_cbf):
-                
+                print(f'Hit index is {i}')
                 data.resize((index+1,) + mask_shape)
+                #mask_data.resize((index+1,) + mask_shape)
+                #input_mask_data.resize((index+1,) + mask_shape)
                 dilate_mask_data.resize((index+1,) + mask_shape)
                 salt_mask_data.resize((index+1,) + mask_shape)
 
                 data[index,] = data_from_cbf
-                
+                #input_mask_data[index,] = staticMask
                 outliersMask_buf = np.zeros_like(staticMask.flatten(), dtype=np.int8)
-                outMask, nummasked = MaskRingsSimplepy(ASIC_NX, ASIC_NY, NASICS_X, NASICS_Y, data_from_cbf.flatten(), staticMask.flatten(), MIN_VAL, MAX_VAL, maxRad, pix_r, WIND, DIFFER, None)
+                outMask, nummasked = MaskRingsSimplepy(asic_nx, asic_ny, nasics_x, nasics_y, data_from_cbf.flatten(), staticMask.flatten(), minVal, maxVal, maxRad, pix_r, wind, differ, None)
 
                 outliersMask_salt = PeakFinder8py(None, data[index,].flatten(), outMask, \
-                                        pix_r, ASIC_NX, ASIC_NY, NASICS_X, NASICS_Y, \
-                                        ADC_THRESH, HIT_FINDER_MIN_SNR, \
-                                        HIT_FINDER_MIN_PIX_COUNT, HIT_FINDER_MAX_PIX_COUNT, HIT_FINDER_LOCAL_BG_RADIUS, outliersMask_buf)
+                                        pix_r, asic_nx, asic_ny, nasics_x, nasics_y, \
+                                        ADCthresh, hitfinderMinSNR, \
+                                        hitfinderMinPixCount, hitfinderMaxPixCount, hitfinderLocalBGRadius, outliersMask_buf)
                 
                 mask_buf = np.zeros_like(staticMask.flatten(), dtype=np.int8)
                 
                 salt_mask_data[index,] = outliersMask_salt.reshape(mask_shape)
                 
-                outliersMask = DilateMask(mask_buf, outliersMask_salt, ASIC_NX, ASIC_NY, NASICS_X, NASICS_Y, MASK_RAD)
+                outliersMask = DilateMask(mask_buf, outliersMask_salt, asic_nx, asic_ny, nasics_x, nasics_y, MASK_RAD)
+                #outliersMask_salt[outliersMask_salt > 1] = 0
+                #outliersMask_salt = 1 - outliersMask_salt
+                
                 outliersMask += inverted_staticMask
                 outliersMask[outliersMask > 1] = 0
                 outliersMask = 1 - outliersMask
                 
+                
+                #mask_data[index,] = outliersMask_salt.reshape(mask_shape)
                 dilate_mask_data[index,] = outliersMask.reshape(mask_shape)
                 index += 1
             
@@ -442,10 +451,14 @@ if __name__ == "__main__":
     else:
         output_folder = args.o
     if not os.path.exists(output_folder):
+        #os.mkdir(output_folder)
         os.makedirs(output_folder, exist_ok=True)
         print('Create')
         
     print(f"Your results can be found here {output_folder}")
+    
+    #geometry = crystfel_utils.load_crystfel_geometry(geometry_filename)
+    #pixel_maps = geometry_utils.compute_pixel_maps(geometry)
     
     geometry, _, __ = crystfel_geometry.load_crystfel_geometry(geometry_filename)
     pixel_maps = crystfel_geometry.compute_pix_maps(geometry)
@@ -457,16 +470,16 @@ if __name__ == "__main__":
     
     
     len_x_map = len(x_map.flatten()) 
-    flag_BRA, pix_r, maxRad, pixelsR = pBuildRadiulArray(len_x_map, x_map, y_map, ISTEP, None, 0, None)
+    flag_BRA, pix_r, maxRad, pixelsR = pBuildRadiulArray(len_x_map, x_map, y_map, istep, None, 0, None)
     
     if args.p is not None:
         files = glob.glob(os.path.join(args.p, f'*{args.e}'))
         if args.e == 'cbf':
             
-            reading_cbf_files(files, staticMask_filename, mask_h5path, MIN_VAL, MAX_VAL, maxRad, pix_r, WIND, DIFFER, output_folder)
+            reading_cbf_files(files, staticMask_filename, mask_h5path, minVal, maxVal, maxRad, pix_r, wind, differ, output_folder)
         elif args.e == 'h5' or args.e == 'cxi':
             h5path = args.h5path
-            reading_hdf5_files(files, h5path, staticMask_filename, mask_h5path, MIN_VAL, MAX_VAL, maxRad, pix_r, WIND, DIFFER, output_folder)
+            reading_hdf5_files(files, h5path, staticMask_filename, mask_h5path, minVal, maxVal, maxRad, pix_r, wind, differ, output_folder)
     elif args.f is not None:
         files = []
         with open(args.f, 'r') as read:
@@ -474,10 +487,10 @@ if __name__ == "__main__":
                 files.append(line.strip())
         if args.e == 'cbf':
             
-            reading_cbf_files(files, staticMask_filename, mask_h5path, MIN_VAL, MAX_VAL, maxRad, pixelsR, WIND, DIFFER, output_folder)
+            reading_cbf_files(files, staticMask_filename, mask_h5path, minVal, maxVal, maxRad, pixelsR, wind, differ, output_folder)
         elif args.e == 'h5' or args.e == 'cxi':
             h5path = args.h5path
-            reading_hdf5_files(files, h5path, staticMask_filename, mask_h5path, MIN_VAL, MAX_VAL, maxRad, pix_r, WIND, DIFFER, output_folder)              
+            reading_hdf5_files(files, h5path, staticMask_filename, mask_h5path, minVal, maxVal, maxRad, pix_r, wind, differ, output_folder)              
     else:
         print('Warning: you have to provide path or list of files with absolute path to each file.')
        
